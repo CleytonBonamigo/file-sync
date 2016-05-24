@@ -6,6 +6,9 @@ var os = require("os");
 var config = fsSync.readJSON('config.json');
 var sync = module.exports = {};
 
+sync.logFile = false;
+sync.logConsole = false;
+
 sync.copy = function(file, dest, options, callback){
 	if (!options)
 		options = {};
@@ -24,7 +27,8 @@ sync.copy = function(file, dest, options, callback){
 			return fsSync.write(dest, content, options);
 		}
 
-		sync.log('debug', file+' => '+dest);
+		if(sync.logFile === true)
+			sync.log('debug', file+' => '+dest);
 
 		return false;
 
@@ -44,9 +48,8 @@ sync.copy = function(file, dest, options, callback){
 			if (fsSync.isFile(full_path)){
 				//Se o arquivo existir e for diferente do destino, copia
 				fs.stat(node_path.join(dest, path), (err, status) => {
-					sync.log('debug', full_path+' => '+node_path.join(dest, path), true);
-
-					sync.sleep(5);
+					if(sync.logFile === true)
+						sync.log('debug', full_path+' => '+node_path.join(dest, path));
 
 					if(err === null || err.null){ //arquivo existe, faz a comparação se é diferente ou não e salva
 						if(sync.compareBinary(full_path, node_path.join(dest, path)) === false){
@@ -90,10 +93,10 @@ sync.compareBinary = function(source, dest, options){
 	return buff1.toString('binary') === buff2.toString('binary');
 };
 
-sync.log = function (level, text, debug){
+sync.log = function (level, text){
 	var message = '{"level":"'+level+'", "message":"'+text+'", "timestamp": "'+new Date().toLocaleString()+'"},';
 
-	if(debug)
+	if(sync.logConsole === true)
 		console.log(message);
 
 	fs.appendFileSync('application.log', message + os.EOL);
@@ -120,9 +123,7 @@ sync.usleep = function(s) {
 sync.removeFile = function(path){
 	fs.stat(path, (err, stats) =>{
 		if(!err){
-			fs.unlink(path, (error, file) => {
-
-			});
+			fs.unlinkSync(path);
 		}
 	});
 };
@@ -135,6 +136,8 @@ if(!config.source_path || !config.destination_path){
 	return false;
 }else{
 	sync.removeFile('application.log');
+	sync.logFile = true;
+	sync.logConsole = true;
 
 	/*Manda como parâmetro:  source_path, destination_path, options (default false) callback*/
 	sync.copy(config.source_path, config.destination_path, {force: true}, sync.watchFolder);
