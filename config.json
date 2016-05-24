@@ -1,4 +1,10 @@
 {
-	"source_path": "D:/wamp/www",
-	"destination_path": "D:/Google Drive/www"
+	"source_path": "C:/wamp/www",
+	"destination_path": "C:/Users/CleytonBonamigo/Google Drive/www",
+	"skip_files": [
+		"vendor", "node_modules"
+	],
+	"not_remove":[
+		"mongoadmin"
+	]
 }
