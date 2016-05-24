@@ -2,6 +2,7 @@ var fs = require('fs');
 var fsSync = require('fs-sync');
 var node_path = require('path');
 var watch = require('node-watch');
+var os = require("os");
 var config = fsSync.readJSON('config.json');
 var sync = module.exports = {};
 
@@ -90,15 +91,12 @@ sync.compareBinary = function(source, dest, options){
 };
 
 sync.log = function (level, text, debug){
-	var message = '{"level":"'+level+'", "message":"'+text+'", "timestamp": "'+new Date().toLocaleString()+'"}';
+	var message = '{"level":"'+level+'", "message":"'+text+'", "timestamp": "'+new Date().toLocaleString()+'"},';
 
 	if(debug)
 		console.log(message);
 
-	fs.appendFile('application.log', message+"\n", {flag: 'a'}, (err) => {
-		if(err !== null)
-			console.log(err);
-	});
+	fs.appendFileSync('application.log', message + os.EOL);
 
 	return true;
 };
