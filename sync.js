@@ -1,7 +1,7 @@
 var fs = require('fs');
 var fsSync = require('fs-sync');
 var node_path = require('path');
-var watch = require('node-watch');
+var watch = require('watch');
 var os = require("os");
 var walk = require('walk');
 var config = fsSync.readJSON('config.json');
@@ -10,6 +10,9 @@ var sync = module.exports = {};
 sync.logFile = false;
 sync.logConsole = false;
 sync.maxReadFileSize = 100;
+sync.skip_remove = '';
+sync.remove_dest = '';
+sync.ignore = '';
 
 sync.copy = function(file, dest, options, callback){
 	if (!options)
@@ -73,14 +76,28 @@ sync.copy = function(file, dest, options, callback){
 }
 
 sync.watchFolder = function(){
-	watch(config.source_path, function(filename) {
-		var fileNameReplaced = filename.replace(/\\/g, '/');
-		fileNameReplaced = fileNameReplaced.split(config.source_path).pop();
+	watch.createMonitor(config.source_path, function (monitor) {
+	    monitor.on("created", function (f, stat) {
+			// Handle new files
+			f = sync.backSlashToSlash(f);
+			var dest = f.replace(config.source_path, config.destination_path);
+			sync.copy(f, dest, {force: true});
+	    });
 
-		//Quando o watch detectar alguma modificação em algum arquivo, chama a função que compara os 2
-		if(sync.compareBinary(filename, config.destination_path+fileNameReplaced) === false)
-			sync.copy(filename, config.destination_path+fileNameReplaced, {force: true});
-	});
+	    monitor.on("changed", function (f, curr, prev) {
+			// Handle file changes
+			f = sync.backSlashToSlash(f);
+			var dest = f.replace(config.source_path, config.destination_path);
+			sync.copy(f, dest, {force: true});
+	    });
+
+	    monitor.on("removed", function (f, stat) {
+			// Handle removed files
+			f = sync.backSlashToSlash(f);
+			f = f.replace(config.source_path, config.destination_path);
+			sync.removeFolderRecursive(f);
+	    });
+  	});
 }
 
 sync.init = function(){
@@ -89,36 +106,35 @@ sync.init = function(){
 	walker.on('file', function(root, stat, next) {
 		var sourceFile = root + '/' + stat.name;
 		var destFile = config.destination_path + sourceFile.replace(config.source_path, '');
-		destFile = destFile.replace(/\\/g, '/');
-		sourceFile = sourceFile.replace(/\\/g, '/');
+		destFile = sync.backSlashToSlash(destFile);
+		sourceFile = sync.backSlashToSlash(sourceFile);
 
-		if(typeof config.skip_files !== "undefined"){
-			for(var i in config.skip_files){
+		if(typeof config.ignore !== "undefined"){
+			for(var i in config.ignore){
 
-				if(sourceFile.indexOf(config.skip_files[i]) === -1){
-					sync.copy(sourceFile, destFile, {force: true});
-				}
-				else{
-					//Check if it's not on not_remove list
-					if(typeof config.not_remove !== "undefined"){
-						for(var j in config.not_remove){
-							if(config.not_remove[j].indexOf(destFile) !== -1)
-								break;
-						}
-					}
+				if(sourceFile.indexOf(config.ignore[i]) !== -1){
+					sync.ignore = sourceFile.substr(0, sourceFile.indexOf(config.ignore[i] + config.ignore[i].length));
+					sync.remove_dest = destFile.substr(0, destFile.indexOf(config.ignore[i] + config.ignore[i].length));
 
-					if(config.skip_files[i].indexOf('.') === -1){ //If it's a folder
-						destFile = destFile.substr(0, destFile.indexOf(config.skip_files[i]) + config.skip_files[i].length);
-						sync.removeFolderRecursive(destFile);
-					}else{
-						//Remove File
-						sync.removeFile(destFile);
-					}
-
-					break; //Stop loop
+					break;
 				}
 			}
+		}
+
+		if(typeof config.skip_remove !== "undefined"){
+			for(var j in config.skip_remove){
+				if(destFile.indexOf(config.skip_remove[j]) !== -1){
+					sync.skip_remove = destFile.substr(0, destFile.indexOf(config.skip_remove[j]) + config.skip_remove[j].length);
+					break;
+				}
+			}
+		}
+
+		if(sync.ignore.indexOf(sourceFile) !== -1){
+			//Don't copy and remove on destination
+			sync.removeFolderRecursive(sync.remove_dest);
 		}else{
+			//Copy files
 			sync.copy(sourceFile, destFile, {force: true});
 		}
 
@@ -126,10 +142,11 @@ sync.init = function(){
 	});
 
 	walker.on('end', function() {
-	    //console.log(files);
-	    sync.watchFolder
+	    sync.compareDestWithSource();
+	    sync.watchFolder();
 	});
 }
+
 
 /*
 	Função que lê o buffer de 2 arquivos e compara seus binários. Retorna se há diferença ou não.
@@ -202,8 +219,18 @@ sync.removeFile = function(path){
 };
 
 sync.removeFolderRecursive = function(dirPath) {
+	if(dirPath.replace('/', '').trim() == ''){
+		throw 'Could not remove '+path;
+	}
+
 	try { var files = fs.readdirSync(dirPath); }
-	catch(e) { return; }
+	catch(e) {
+		if(e.code.toLowerCase() == 'enotdir'){
+			if (fs.statSync(dirPath).isFile())
+				sync.removeFile(dirPath);
+		}
+		return; 
+	}
 
 	if (files.length > 0){
 		for (var i = 0; i < files.length; i++) {
@@ -221,6 +248,27 @@ sync.removeFolderRecursive = function(dirPath) {
 		sync.log('remove', dirPath);
 };
 
+sync.compareDestWithSource = function(){
+	try { 
+		var filesDest = fs.readdirSync(config.destination_path);
+		var filesSource = fs.readdirSync(config.source_path);
+	}
+	catch(e) { return; }
+
+	if (filesDest.length > 0){
+		filesDest.forEach(function(file){
+			if(filesSource.indexOf(file) === -1){
+				var filePath = config.destination_path + '/' + file;
+				//Not exists on source dir. Delete that shit;
+				if (fs.statSync(filePath).isFile())
+					sync.removeFile(filePath);
+				else
+					sync.removeFolderRecursive(filePath);
+			}
+		});
+	}
+}
+
 sync.getFilesizeInBytes = function(filename) {
 	var stats = fs.statSync(filename);
 
@@ -229,4 +277,8 @@ sync.getFilesizeInBytes = function(filename) {
 
 sync.getFileziseInMegabytes = function(filename){
 	return (sync.getFilesizeInBytes(filename) / 1024) / 1024;
+}
+
+sync.backSlashToSlash = function(string){
+	return string.replace(/\\/g, '/');
 }
